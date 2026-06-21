@@ -120,6 +120,7 @@
           id="pnl-value"
           class="text-4xl font-bold text-white leading-none tabular-nums"
         >+0.0000%</div>
+        <div id="pnl-inr-value" class="text-emerald-500 font-semibold text-sm tabular-nums tracking-wider">₹0.00</div>
         <div class="mt-1 text-gray-700 text-xs">cumulative session return</div>
         <div class="mt-3 flex items-center gap-5 text-xs text-gray-700">
           <span>PEAK <span id="peak-pnl" class="text-gray-500">—</span></span>
@@ -164,12 +165,14 @@
       <div
         class="flex-shrink-0 grid px-5 py-2 border-b border-gray-800/40
                text-gray-700 text-xs tracking-widest"
-        style="grid-template-columns: 148px 1fr 140px 114px;"
+        style="grid-template-columns: 130px 1fr 130px 110px 90px 100px;"
       >
         <span>TIME</span>
         <span>EXECUTION PATH</span>
+        <span class="text-right">MAX TRADE SIZE</span>
         <span class="text-right">MULTIPLIER</span>
         <span class="text-right">PROFIT %</span>
+        <span class="text-right">PROFIT (INR)</span>
       </div>
 
       <div id="feed-body" class="flex-1 min-h-0 overflow-y-auto relative">

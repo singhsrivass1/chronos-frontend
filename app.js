@@ -5,25 +5,10 @@ const CONFIG = Object.freeze({
 
     CHART_LINE_COLOR : '#e5e7eb',
 
-    TICK_MS_MIN : 100,
-    TICK_MS_MAX : 800,
-    ARB_S_MIN   : 2,
-    ARB_S_MAX   : 4,
-
-    MOCK_PATHS : [
-        'USDT → ETH  → BTC  → USDT',
-        'USDT → BNB  → ETH  → USDT',
-        'USDT → SOL  → BTC  → USDT',
-        'USDT → AVAX → ETH  → USDT',
-        'ETH  → BNB  → SOL  → ETH',
-        'USDT → MATIC → SOL → ETH → USDT',
-        'USDT → BTC  → LTC  → USDT',
-        'USDT → DOGE → BTC  → ETH → USDT',
-        'USDT → ARB  → ETH  → USDT',
-        'BTC  → ETH  → BNB  → BTC',
-    ],
+    WS_URL           : 'wss://chronos-backend-1-2ffx.onrender.com/ws',
+    HYDRATE_URL      : 'https://chronos-backend-1-2ffx.onrender.com/api/hydrate',
+    TOTALS_URL       : 'https://chronos-backend-1-2ffx.onrender.com/api/totals',
 });
-
 
 const ChartManager = (() => {
     let chart = null;
@@ -131,6 +116,7 @@ const UIManager = (() => {
         el.flashDot      = document.getElementById('cycle-flash-dot');
         el.lastCycleTs   = document.getElementById('last-cycle-ts');
         el.pnlValue      = document.getElementById('pnl-value');
+        el.pnlInrValue   = document.getElementById('pnl-inr-value');
         el.peakPnl       = document.getElementById('peak-pnl');
         el.maxDrawdown   = document.getElementById('max-drawdown');
         el.chartPeak     = document.getElementById('chart-peak');
@@ -140,36 +126,43 @@ const UIManager = (() => {
         el.feedEmpty     = document.getElementById('feed-empty');
         el.feedCount     = document.getElementById('feed-count');
     }
-
-    function updateTPS(tps) {
+  
+    function updateTPS(tps, uptimeSeconds, totalCycles) {
         el.tpsValue.textContent = tps.toLocaleString();
         el.tpsBar.style.width   = Math.min((tps / CONFIG.TPS_BAR_MAX) * 100, 100).toFixed(1) + '%';
-    }
-
-    function updateUptime(seconds) {
-        const h = String(Math.floor(seconds / 3600)).padStart(2, '0');
-        const m = String(Math.floor((seconds % 3600) / 60)).padStart(2, '0');
-        const s = String(Math.floor(seconds % 60)).padStart(2, '0');
+        
+        const h = String(Math.floor(uptimeSeconds / 3600)).padStart(2, '0');
+        const m = String(Math.floor((uptimeSeconds % 3600) / 60)).padStart(2, '0');
+        const s = String(Math.floor(uptimeSeconds % 60)).padStart(2, '0');
         el.uptimeDisplay.textContent = `${h}:${m}:${s}`;
+
+        el.cyclesValue.textContent = totalCycles.toLocaleString();
     }
 
-    function updateCycles(count, timestamp) {
-        el.cyclesValue.textContent = count.toLocaleString();
-        el.lastCycleTs.textContent = timestamp;
+    function setInitialPnL(netPercent, totalInr) {
+        const sign = netPercent >= 0 ? '+' : '';
+        el.pnlValue.textContent = `${sign}${netPercent.toFixed(4)}%`;
+        el.pnlInrValue.textContent = `₹${totalInr.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+        
+        peakPnl = netPercent;
+        troughPnl = netPercent;
+    }
 
+    function flashCycleUpdate(timestamp) {
+        el.lastCycleTs.textContent = timestamp;
         clearTimeout(flashDotTimer);
         el.flashDot.style.backgroundColor = 'rgba(255,255,255,0.85)';
-        flashDotTimer = setTimeout(() => {
-            el.flashDot.style.backgroundColor = 'rgba(255,255,255,0.1)';
-        }, 320);
+        flashDotTimer = setTimeout(() => { el.flashDot.style.backgroundColor = 'rgba(255,255,255,0.1)'; }, 320);
     }
 
-    function updatePnL(cumPct) {
+    function updatePnL(cumPct, totalInr) {
         const sign = cumPct >= 0 ? '+' : '';
         el.pnlValue.textContent = `${sign}${cumPct.toFixed(4)}%`;
 
         el.pnlValue.classList.remove('text-white', 'text-emerald-600', 'text-rose-600');
         el.pnlValue.classList.add(cumPct >= 0 ? 'text-emerald-600' : 'text-rose-600');
+
+        el.pnlInrValue.textContent = `₹${totalInr.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
 
         if (peakPnl === null || cumPct > peakPnl) {
             peakPnl = cumPct;
@@ -194,16 +187,19 @@ const UIManager = (() => {
         const isProfit  = trade.profitPercent >= 0;
         const profitCls = isProfit ? 'text-emerald-600' : 'text-rose-600';
         const sign      = isProfit ? '+' : '';
+        const baseAsset = trade.path.split('->')[0].trim();
 
         const row = document.createElement('div');
         row.className   = 'row-new grid text-xs border-b border-gray-800/20 px-5 py-2';
-        row.style.gridTemplateColumns = '148px 1fr 140px 114px';
+        row.style.gridTemplateColumns = '130px 1fr 130px 110px 90px 100px';
 
         row.innerHTML = `
             <span class="text-gray-500 tabular-nums">${trade.timestamp}</span>
             <span class="text-gray-400 truncate pr-3">${trade.path}</span>
+            <span class="text-right text-cyan-500 tabular-nums">${trade.maxCapacity.toFixed(2)} ${baseAsset}</span>
             <span class="text-right text-gray-400 tabular-nums">${trade.multiplier.toFixed(6)}&times;</span>
             <span class="text-right ${profitCls} font-semibold tabular-nums">${sign}${trade.profitPercent.toFixed(4)}%</span>
+            <span class="text-right ${profitCls} font-semibold tabular-nums tracking-wider">₹${trade.inrProfit.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
         `;
 
         row.addEventListener('mouseover', () => { row.style.backgroundColor = 'rgba(255,255,255,0.025)'; });
@@ -220,106 +216,100 @@ const UIManager = (() => {
         el.feedCount.textContent = `${rowCount} entr${rowCount === 1 ? 'y' : 'ies'}`;
     }
 
-    return { init, updateTPS, updateUptime, updateCycles, updatePnL, prependFeedRow };
+    return { init, updateTPS, setInitialPnL, flashCycleUpdate, updatePnL, prependFeedRow};
 })();
 
-
-class ChronosMockEngine {
-
-    constructor(onMessage) {
-        this._emit      = onMessage;
-        this._tickTimer = null;
-        this._arbTimer  = null;
-        this._startMs   = Date.now();
-        this._seq       = 0;
-    }
-
-    start() {
-        this._tick();
-        this._arb();
-    }
-
-    stop() {
-        clearTimeout(this._tickTimer);
-        clearTimeout(this._arbTimer);
-    }
-
-    _tick() {
-        const delay = CONFIG.TICK_MS_MIN + Math.random() * (CONFIG.TICK_MS_MAX - CONFIG.TICK_MS_MIN);
-        this._tickTimer = setTimeout(() => {
-            this._emit({
-                type : 'METRICS_UPDATE',
-                data : {
-                    tps           : Math.floor(800 + Math.random() * 4200),
-                    uptimeSeconds : (Date.now() - this._startMs) / 1000,
-                },
-            });
-            this._tick();
-        }, delay);
-    }
-
-    _arb() {
-        const delay = (CONFIG.ARB_S_MIN + Math.random() * (CONFIG.ARB_S_MAX - CONFIG.ARB_S_MIN)) * 1000;
-        this._arbTimer = setTimeout(() => {
-            const now        = new Date();
-            const hms        = now.toTimeString().slice(0, 8);
-            const ms         = String(now.getMilliseconds()).padStart(3, '0');
-            const multiplier = 1 + (0.0008 + Math.random() * 0.019);
-            const profitPct  = parseFloat(((multiplier - 1) * 100).toFixed(4));
-
-            this._emit({
-                type : 'ARBITRAGE_FOUND',
-                data : {
-                    id            : `${Date.now()}${++this._seq}`,
-                    timestamp     : `${hms}.${ms}`,
-                    path          : CONFIG.MOCK_PATHS[Math.floor(Math.random() * CONFIG.MOCK_PATHS.length)],
-                    multiplier,
-                    profitPercent : profitPct,
-                },
-            });
-            this._arb();
-        }, delay);
-    }
-}
-
-
 const state = {
-    totalCycles : 0,
-    netPnL      : 0,
+    netINRVolume  : 1.0,
+    netMultiplier : 1.0,
+    netProfitINR  : 0.0,
+    processedIds  : new Set()
 };
 
-function handleMessage(payload) {
-    switch (payload.type) {
+function initWebSocket() {
+    console.log("[CHRONOS] Attempting connection to Engine...");
+    const ws = new WebSocket(CONFIG.WS_URL);
 
-        case 'METRICS_UPDATE': {
-            const { tps, uptimeSeconds } = payload.data;
-            UIManager.updateTPS(tps);
-            UIManager.updateUptime(uptimeSeconds);
-            break;
+    ws.onopen = () => console.log("[CHRONOS] Locked into HFT Stream.");
+    ws.onclose = () => {
+        console.warn("[CHRONOS] Stream severed. Reconnecting in 3s...");
+        setTimeout(initWebSocket, 3000);
+    };
+
+    ws.onmessage = async (event) => {
+        const payload = JSON.parse(event.data);
+
+        if (payload.type === 'METRICS_UPDATE') {
+            UIManager.updateTPS(payload.data.tps, payload.data.uptimeSeconds, payload.data.totalCycleCount);
         }
 
-        case 'ARBITRAGE_FOUND': {
-            const { timestamp, path, multiplier, profitPercent } = payload.data;
-            state.totalCycles += 1;
-            state.netPnL = parseFloat((state.netPnL + profitPercent).toFixed(6));
-            UIManager.updateCycles(state.totalCycles, timestamp);
-            UIManager.updatePnL(state.netPnL);
-            UIManager.prependFeedRow({ timestamp, path, multiplier, profitPercent });
-            ChartManager.addPoint(timestamp, state.netPnL);
-            break;
-        }
+        if (payload.type === 'ARBITRAGE_FOUND') {
+            const { id, timestamp, path, multiplier, maxCapacity, inrProfit } = payload.data;
 
-        default:
-            console.warn('[CHRONOS] Unknown message type:', payload.type);
-    }
+            if (state.processedIds.has(id)) return;
+            state.processedIds.add(id);
+
+            const date = new Date(timestamp);
+            const formattedTime = `${date.toTimeString().slice(0, 8)}.${String(date.getMilliseconds()).padStart(3, '0')}`;
+
+            const profitPercent = (multiplier - 1.0) * 100;
+            state.netProfitINR += inrProfit;
+            state.netINRVolume += inrProfit / (multiplier - 1.0);
+
+            state.netMultiplier = state.netProfitINR / state.netINRVolume;
+            const netPnLPercent = state.netMultiplier * 100;
+
+            UIManager.flashCycleUpdate(formattedTime);
+            UIManager.prependFeedRow({ id, timestamp: formattedTime, path, maxCapacity, multiplier, profitPercent, inrProfit });
+            ChartManager.addPoint(formattedTime, profitPercent);
+            UIManager.updatePnL(netPnLPercent, state.netProfitINR);
+        }
+    };
 }
 
-
-function init() {
+async function init() {
     UIManager.init();
     ChartManager.init();
-    const engine = new ChronosMockEngine(handleMessage);
-    engine.start();
+    
+    try {
+        const historyRes = await fetch(CONFIG.HYDRATE_URL);
+        const history = await historyRes.json();
+        
+        const totalsRes = await fetch(CONFIG.TOTALS_URL);
+        
+        if (totalsRes.ok) {
+            const totals = await totalsRes.json();
+            state.netINRVolume = totals.totalInrVolume || 1.0;
+            state.netProfitINR = totals.totalInrProfit || 0.0;
+
+            state.netMultiplier = state.netProfitINR / state.netINRVolume;
+            
+            const trueNetPercent = state.netMultiplier * 100;
+            UIManager.setInitialPnL(trueNetPercent, state.netProfitINR);
+        }
+
+        // Hydrate History Table
+        if (history && history.length) {
+            history.reverse().forEach((row) => {
+                const { id, timestamp, path, multiplier, maxCapacity, inrProfit } = row;
+                if (state.processedIds.has(id)) return;
+                state.processedIds.add(id);
+
+                const date = new Date(timestamp);
+                const formattedTime = `${date.toTimeString().slice(0, 8)}.${String(date.getMilliseconds()).padStart(3, '0')}`;
+                const profitPercent = (multiplier - 1.0) * 100;
+                state.netProfitINR += inrProfit;
+                state.netINRVolume += inrProfit / (multiplier - 1.0);
+
+                UIManager.prependFeedRow({ id, timestamp: formattedTime, path, maxCapacity, multiplier, profitPercent, inrProfit });
+                ChartManager.addPoint(formattedTime, profitPercent);
+            });
+        }
+    } catch (e) {
+        console.error("Boot sequence hydration failed:", e);
+    }
+    
+    initWebSocket();
 }
 
 document.addEventListener('DOMContentLoaded', init);
