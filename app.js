@@ -144,7 +144,7 @@ const UIManager = (() => {
         el.pnlValue.textContent = `${sign}${netPercent.toFixed(4)}%`;
         el.pnlInrValue.textContent = `₹${totalInr.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
         
-        peakPnl = netPercent;
+        peakPnl = 0;
         troughPnl = netPercent;
     }
 
@@ -277,6 +277,23 @@ async function init() {
         
         const totalsRes = await fetch(CONFIG.TOTALS_URL);
         
+        // Hydrate History Table
+        if (history && history.length) {
+            history.reverse().forEach((row) => {
+                const { id, timestamp, path, multiplier, maxCapacity, inrProfit } = row;
+                if (state.processedIds.has(id)) return;
+                state.processedIds.add(id);
+
+                const date = new Date(timestamp);
+                const formattedTime = `${date.toTimeString().slice(0, 8)}.${String(date.getMilliseconds()).padStart(3, '0')}`;
+                const profitPercent = (multiplier - 1.0) * 100;
+
+                UIManager.prependFeedRow({ id, timestamp: formattedTime, path, maxCapacity, multiplier, profitPercent, inrProfit });
+                ChartManager.addPoint(formattedTime, profitPercent);
+                UIManager.updatePnL(profitPercent, inrProfit);
+            });
+        }
+        
         if (totalsRes.ok) {
             const totals = await totalsRes.json();
             state.netINRVolume = totals.totalInrVolume || 1.0;
@@ -288,23 +305,6 @@ async function init() {
             UIManager.setInitialPnL(trueNetPercent, state.netProfitINR);
         }
 
-        // Hydrate History Table
-        if (history && history.length) {
-            history.reverse().forEach((row) => {
-                const { id, timestamp, path, multiplier, maxCapacity, inrProfit } = row;
-                if (state.processedIds.has(id)) return;
-                state.processedIds.add(id);
-
-                const date = new Date(timestamp);
-                const formattedTime = `${date.toTimeString().slice(0, 8)}.${String(date.getMilliseconds()).padStart(3, '0')}`;
-                const profitPercent = (multiplier - 1.0) * 100;
-                state.netProfitINR += inrProfit;
-                state.netINRVolume += inrProfit / (multiplier - 1.0);
-
-                UIManager.prependFeedRow({ id, timestamp: formattedTime, path, maxCapacity, multiplier, profitPercent, inrProfit });
-                ChartManager.addPoint(formattedTime, profitPercent);
-            });
-        }
     } catch (e) {
         console.error("Boot sequence hydration failed:", e);
     }
